@@ -1,0 +1,350 @@
+<?php namespace ProcessWire;
+/**
+ * ItrechtConnector
+ *
+ *
+ * By .pupit GmbH (https://www.pupit.de)
+ */
+
+class ItrkService extends Process
+{
+
+    const pageName = 'itrkservice';
+    const apiPageName = 'itrkapi';
+    const rechtstext_type_values = array('agb','datenschutz','widerruf','impressum');
+    const initKey = 'x';
+
+    public static function getModuleInfo()
+    {
+        return array(
+            'title' => __('ITRK-Service'),
+            'version' => '0.0.1.0',
+            'summary' => '',
+            'autoload' => true,
+            'requires' => array('ProcessWire>=3.0.145', 'PHP>=7.3'),
+        );
+    }
+
+    public static function generateToken(): string{
+        return md5(uniqid('', true));
+    }
+
+
+    static protected function getDefaultData()
+    {
+        return array(
+            'token' => '',
+            'endpoints' => array()
+        );
+    }
+
+    public function __construct()
+    {
+
+    }
+
+    public function ___executeEdit(){
+        $this->config->scripts->add(
+            __DIR__ . '/' . 'ItrkService.js'
+        );
+
+        $endpoints = $this->endpoints;
+        $thatEndpointKey = null;
+        foreach ($endpoints as $key => $endpoint){
+            if ($endpoint['r'] == $this->input->get('r') && $endpoint['l'] == $this->input->get('l')){
+                $thatEndpointKey = $key;
+                break;
+            }
+        }
+
+        if ($this->input->post('save')){
+            $endpoints[$thatEndpointKey]['p'] = $this->input->post('page');
+            $endpoints[$thatEndpointKey]['f'] = $this->input->post('field');
+            $endpoints[$thatEndpointKey]['lc'] = self::initKey;
+
+            $this->modules->saveConfig($this, 'endpoints', $endpoints);
+            $this->modules->saveConfig($this, 'token', $this->token);
+            $this->message('Einstellungen gespeichert');
+        }
+
+        $form = $this->modules->get('InputfieldForm');
+        $form->id = 'editForm';
+        $form->action = 'edit?r='.$this->input->get('r').'&l='.$this->input->get('l');
+
+        $fieldset = $this->modules->get('InputfieldFieldset');
+        $fieldset->label = 'Angaben zur Konfiguration - ' . $this->input->get('r') . ' (' . $this->languages->get($this->input->get('l'))->name . ')';
+
+        $tokenField = $this->modules->get('InputfieldMarkup');
+        $tokenField->label = "API-Token";
+        $tokenField->value = $this->token;
+
+        $fieldset->add($tokenField);
+
+        $urlField = $this->modules->get('InputfieldMarkup');
+        $urlField->label = "Ihre API-URL";
+        $urlField->value = $this->pages->get(1)->httpUrl . self::apiPageName;
+
+        $fieldset->add($urlField);
+
+        $form->add($fieldset);
+
+        $fieldset = $this->modules->get('InputfieldFieldset');
+        $fieldset->label = 'Einstellungen - ' . $this->input->get('r') . ' (' . $this->languages->get($this->input->get('l'))->name . ')';
+
+        $page = $this->modules->get('InputfieldPage');
+        $page->name = 'page';
+        $page->id = 'page';
+        $page->label = 'Seite';
+        $page->columnWidth = 50;
+        $page->parent_id = 1;
+        $page->inputfield = 'InputfieldPageListSelect';
+        $page->getInputfield()->value = $this->input->post('page') ?? $endpoints[$thatEndpointKey]['p'] ?? null;
+
+        $fieldset->add($page);
+
+        $pageURL = $this->modules->get('InputfieldMarkup');
+        $pageURL->label = "Seiten-URL";
+        $pageURL->columnWidth = 50;
+        $pageURL->value = $this->pages->get($page->getInputfield()->value)->httpURL();
+
+
+        $fieldset->add($pageURL);
+
+        $fieldselect = $this->modules->get('InputfieldSelect');
+        $fieldselect->name = 'field';
+        $fieldselect->id = 'field';
+        $fieldselect->label = 'Feld';
+        foreach ($this->fields as $field){
+            if ($field->type instanceof FieldtypeTextarea && $this->pages->get($page->getInputfield()->value)->hasField($field)) {
+                $fieldselect->addOption($field->id, $field->name);
+            }
+        }
+        $fieldselect->value = $endpoints[$thatEndpointKey]['f'] ?? null;
+
+
+        $fieldset->add($fieldselect);
+
+        $submitButton = $this->modules->get('InputfieldButton');
+        $submitButton->name = 'save';
+        $submitButton->id = 'save';
+        $submitButton->type = 'submit';
+        $submitButton->value = 'Speichern';
+
+        $fieldset->add($submitButton);
+
+        $form->add($fieldset);
+        return $form->render();
+    }
+
+    public function ___execute(){
+
+        $table = $this->modules->get('MarkupAdminDataTable');
+        $table->setEncodeEntities(false);
+        $table->headerRow(['Rechtstext (Sprache)', 'Seite', 'Feld', 'Sprache-Ort', 'zuletzt aktualisiert', 'Seitenlink', 'Konfigurieren']);
+
+        foreach ($this->endpoints as $endpoint){
+            //set user language for correct link
+            $this->user->language = $this->languages->getLanguage($endpoint["l"]);
+
+            $table->row([$endpoint["r"] . ' (' .$this->languages->getLanguage($endpoint["l"])->name.')', isset($endpoint["p"]) ? $this->pages->get($endpoint["p"])->title : '',isset($endpoint["f"]) ? $this->fields->get($endpoint["f"])->name : '', $endpoint["lc"] ?? '', isset($endpoint["t"]) ? date('d.m.Y H:i:s', $endpoint["t"]) : 'nicht eingerichtet',isset($endpoint["p"]) ? '<a href="'.$this->pages->get($endpoint["p"])->httpUrl().'" target="_blank">Link</a>' : '','<a href="edit?r='.$endpoint["r"].'&l='.$endpoint["l"].'">Konfigurieren</a>']);
+        }
+
+        return  $table->render();
+    }
+
+    public function checkApi(HookEvent $event): void
+    {
+        // get URL
+        $parsed_url = parse_url($_SERVER['REQUEST_URI']);
+        // get path from URL
+        $path = rtrim($parsed_url['path'], '/');
+
+        // if installed in a subdirectory, make $path relative to the ProcessWire directory
+        if ($this->config->urls->root != '/') {
+            $path = substr($path, strlen($this->config->urls->root) - 1);
+        }
+
+        $path = trim($path, '/');
+
+        // exit if path is not the API path
+        if ($path != self::apiPageName) {
+            return;
+        }
+
+        wire('log')->message('itrkapi contacted by ' . $_SERVER['REMOTE_ADDR']);
+
+        // START IT-Recht Code
+
+        // settings
+        $setting_client_id		= 'processwirepost';
+        $setting_client_secret	= 'fsDaz9r23iokJnLfgvcxp97Pq2';
+
+        // include class
+        require_once(__DIR__ . '/' . 'LegalTextInterface.php');
+
+        $event->replace = true;
+
+        // create class instance
+        $LTI = new \ITRechtKanzlei\LegalTextInterface();
+
+        // validate shared secret in legal text transmission
+        $LTI->validate_API_user_pass($setting_client_id, $setting_client_secret);
+
+        // read token from legal text transmission
+        $token = $LTI->get_AUTH_Token();
+
+        // report OK if shop was found / token is valid, or report that the lookup had no valid result
+        if ($token === $this->token){
+            $LTI->send_AUTH_ok();
+        } else {
+            $LTI->send_AUTH_failed();
+            return;
+        }
+
+        // read more values from current legal text (LT) transmission
+        $LT_Language	= $LTI->get_LT_Language();	// ISO 639-1 (lowercase, e.g. 'de' for German / Deutsch)
+        $LT_Country		= $LTI->get_LT_Country();	// ISO 3166-1-alpha-2 (uppercase, e.g. 'DE' for Germany/Deutschland)
+        $LT_Title		= $LTI->get_LT_Title();		// can be used e.g. as a title for a CMS page
+        $LT_Text		= $LTI->get_LT_Text();		// the legal text in text form
+        $LT_HTML		= $LTI->get_LT_HTML();		// the legal text in HTML form
+        $LT_Type		= $LTI->get_LT_Type();		// holds the legal text type ('agb','datenschutz','widerruf','impressum')
+
+        $thatEndpointKey = '';
+
+
+        $endpointCount = 0;
+        foreach ($this->endpoints as $key => $endpoint){
+            if ($endpoint['r'] == $LT_Type && $endpoint['lc'] == $LT_Language . '-' .$LT_Country){
+                $thatEndpointKey = $key;
+                $endpointCount++;
+                break;
+            } elseif($endpoint['r'] == $LT_Type && $endpoint['lc'] == self::initKey){
+                $thatEndpointKey = $key;
+                $endpointCount++;
+                break;
+            }
+        }
+        if ($endpointCount == 0){
+            $LTI->send_ERROR('Fehler beim Speichern des Rechtstextes. Endpunkt nicht gefunden.');
+            return;
+        }
+
+        $fieldname = $this->fields->get($this->endpoints[$thatEndpointKey]['f'])->name;
+
+        // Change user language to text language for multi-language textareas
+        $this->user->language = $this->languages->get($this->endpoints[$thatEndpointKey]['l']);
+
+        if ($this->pages->get($this->endpoints[$thatEndpointKey]['p'])->setAndSave($fieldname, $LT_HTML)){
+            wire('log')->message($LT_Type . ' updated');
+            if ($this->pages->get($this->endpoints[$thatEndpointKey]['p'])->$fieldname == $LT_HTML){
+                $endpoints = $this->endpoints;
+                $endpoints[$thatEndpointKey]['t'] = time();
+                $endpoints[$thatEndpointKey]['lc'] = $LT_Language . '-' .$LT_Country;
+                $this->modules->saveConfig($this, 'endpoints', $endpoints);
+                $this->modules->saveConfig($this, 'token', $this->token);
+                $LTI->send_SUCCESS();
+            } else {
+                $LTI->send_ERROR('Fehler beim Speichern des Rechtstextes. Textabgleich fehlgeschlagen.');
+            }
+        } else {
+            $LTI->send_ERROR('Fehler beim Speichern des Rechtstextes. Datenbankerror.');
+        }
+    }
+
+    /**
+     * Init method
+     *
+     * This method is called when the module is loaded. We use it to attach hooks.
+     */
+    public function init() {
+        $data = array();
+        if ($this->modules->isInstalled($this)){
+            $data = $this->modules->getModuleConfigData($this);
+        }
+
+        $defaultData = self::getDefaultData();
+
+        // check current processwire languages
+        foreach($this->languages as $language) {
+            foreach (self::rechtstext_type_values as $rechtstext) {
+                array_push($defaultData['endpoints'],["r" => $rechtstext, "l" =>$language->id]);
+            }
+        }
+
+        if (!isset($data['endpoints'])){
+            $data['endpoints'] = array();
+        }
+
+        // array merge for endpoints
+        foreach ($defaultData['endpoints'] as $ddEndpoint){
+            $endpointCount = 0;
+            foreach ($data['endpoints'] as $endpoint){
+                if ($endpoint['r'] == $ddEndpoint['r'] && $endpoint['l'] == $ddEndpoint['l']){
+                    $endpointCount++;
+                    break;
+                }
+            }
+            if ($endpointCount == 0){
+                array_push($data['endpoints'], $ddEndpoint);
+            }
+        }
+        $this->setArray(array_merge($defaultData, $data));
+
+        if ($this->token == '') {
+            $this->token = self::generateToken();
+            $this->modules->saveConfig($this, 'token', $this->token);
+        }
+
+        parent::init();
+
+        $this->addHookBefore('ProcessPageView::pageNotFound', $this, 'checkApi');
+    }
+
+    /**
+     * Install
+     *
+     */
+    public function ___install() {
+
+        // create the page our module will be assigned to
+        $page = new Page();
+        $page->template = 'admin';
+        $page->name = self::pageName;
+
+        // installs to the admin "Setup" menu ... change as you see fit
+        $page->parent = $this->pages->get($this->config->adminRootPageID)->child('name=setup');
+        $page->process = $this;
+
+        // we will make the page title the same as our module title
+        // but you can make it whatever you want
+        $info = self::getModuleInfo();
+        $page->title = $info['title'];
+
+        // save the page
+        $page->save();
+
+        // tell the user we created this page
+        $this->message("Created Page: {$page->path}");
+    }
+
+    /**
+     * Uninstall
+     *
+     */
+    public function ___uninstall() {
+
+        // find the page we installed, locating it by the process field (which has the module ID)
+        // it would probably be sufficient just to locate by name, but this is just to be extra sure.
+        $moduleID = $this->modules->getModuleID($this);
+        $page = $this->pages->get("template=admin, process=$moduleID, name=" . self::pageName . "|core-upgrade");
+
+        if($page->id) {
+            // if we found the page, let the user know and delete it
+            $this->message("Deleting Page: {$page->path}");
+            $page->delete();
+        }
+
+        wireRmdir($this->tempPath, true);
+    }
+
+}
