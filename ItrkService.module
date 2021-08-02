@@ -18,7 +18,7 @@ class ItrkService extends Process
     {
         return array(
             'title' => __('ITRK-Service'),
-            'version' => '0.0.1.0',
+            'version' => '0.0.1.1',
             'summary' => '',
             'autoload' => true,
             'requires' => array('ProcessWire>=3.0.145', 'PHP>=7.3'),
@@ -81,8 +81,8 @@ class ItrkService extends Process
         $fieldset->add($tokenField);
 
         $urlField = $this->modules->get('InputfieldMarkup');
-        $urlField->label = "Ihre API-URL";
-        $urlField->value = $this->pages->get(1)->httpUrl . self::apiPageName;
+        $urlField->label = "Ihre (Shop-)URL";
+        $urlField->value = $this->pages->get(1)->httpUrl;
 
         $fieldset->add($urlField);
 
