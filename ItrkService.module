@@ -204,6 +204,15 @@ class ItrkService extends Process
         // read more values from current legal text (LT) transmission
         $LT_Language	= $LTI->get_LT_Language();	// ISO 639-1 (lowercase, e.g. 'de' for German / Deutsch)
         $LT_Country		= $LTI->get_LT_Country();	// ISO 3166-1-alpha-2 (uppercase, e.g. 'DE' for Germany/Deutschland)
+        // legal text (LT) transmission service uses dummy country/Language "XX"
+        // to test login/passwort credentials are correct (exit here as those dummy texts should never be imported)
+        if (strtolower($LT_Language) == 'xx') {
+            $LTI->send_ERROR('Ungültige Sprache', '9');
+        }
+        if (strtolower($LT_Country) == 'xx') {
+            $LTI->send_ERROR('Ungültiges Land', '17');
+        }
+
         $LT_Title		= $LTI->get_LT_Title();		// can be used e.g. as a title for a CMS page
         $LT_Text		= $LTI->get_LT_Text();		// the legal text in text form
         $LT_HTML		= $LTI->get_LT_HTML();		// the legal text in HTML form
