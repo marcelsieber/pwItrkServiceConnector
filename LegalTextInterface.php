@@ -342,8 +342,8 @@ class LegalTextInterface{
 	public function send_SUCCESS(){
 		$this->returnSuccess();
 	}
-	public function send_ERROR($param_errormessage = NULL){
-		$this->returnError('99', $param_errormessage);
+	public function send_ERROR($param_errormessage = NULL, $error_code = '99'){
+		$this->returnError($error_code, $param_errormessage);
 	}
 	
 	public function send_ERROR_shop_configuration_incomplete($param_errormessage = NULL){
