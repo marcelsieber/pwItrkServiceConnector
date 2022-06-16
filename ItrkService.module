@@ -18,7 +18,7 @@ class ItrkService extends Process
     {
         return array(
             'title' => __('ITRK-Service'),
-            'version' => '0.0.1.1',
+            'version' => '0.1.0.0',
             'summary' => '',
             'autoload' => true,
             'requires' => array('ProcessWire>=3.0.145', 'PHP>=7.3'),
